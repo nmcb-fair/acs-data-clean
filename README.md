@@ -49,7 +49,7 @@ After running the script, check `export/`:
 
 - `acs-nmcb-*.csv`: cleaned data files with headers.
 - `deleted_cells_log.csv`: records values removed during checkpoint correction.
-- `generalized_rule_misalignment_log.csv`: records remaining possible alignment warnings.
+- `generalized_rule_misalignment_log.csv`: records remaining possible alignment warnings. Missing later tasks are not included, because they usually mean the participant stopped before that part.
 
 For one-file processing, the logs are named after the output file, for example:
 

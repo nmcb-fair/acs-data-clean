@@ -175,14 +175,16 @@ build_generalized_misalignment_report <- function(dt, file_name, headers, checkp
 
     actual_values <- normalize_token(as.character(dt[[h]]))
     expected_norm <- normalize_token(expected_generalized)
-    bad_idx <- which(is.na(actual_values) | actual_values != expected_norm)
+    # Missing checkpoints usually mean the participant stopped before that task.
+    # Report only values that are present but do not match the expected marker.
+    bad_idx <- which(!is.na(actual_values) & actual_values != expected_norm)
 
     if (length(bad_idx) == 0) {
       next
     }
 
     has_explicit_override <- !is.na(unname(checkpoints[h])[1])
-    mismatch_type <- ifelse(is.na(actual_values[bad_idx]), "missing", "value_mismatch")
+    mismatch_type <- rep("value_mismatch", length(bad_idx))
 
     mismatch_rows[[length(mismatch_rows) + 1]] <- data.table(
       file = file_name,
