@@ -373,6 +373,7 @@ align_tokens_to_header <- function(tokens, headers, checkpoints, file_name, row_
 process_acs_file <- function(raw_file,
                              header_file,
                              output_file,
+                             token_prefix = NULL,
                              checkpoint_map = default_checkpoint_map()) {
   acs_header <- read_acs_header(header_file)
   lines <- readLines(raw_file, warn = FALSE, encoding = "UTF-8")
@@ -380,7 +381,72 @@ process_acs_file <- function(raw_file,
   normalized_lines <- to_utf8(vapply(lines, normalize_pipe_triplets, character(1)))
   token_lists <- strsplit(normalized_lines, ",", fixed = TRUE)
   token_lists <- lapply(token_lists, to_utf8)
+  source_row_idx <- seq_along(token_lists)
+  input_rows <- length(token_lists)
+
+  if (!is.null(token_prefix) && !is.na(token_prefix) && nzchar(token_prefix)) {
+    keep_rows <- vapply(
+      token_lists,
+      function(tokens) {
+        length(tokens) >= 2 && startsWith(tolower(trimws(tokens[[2]])), tolower(token_prefix))
+      },
+      logical(1)
+    )
+
+    token_lists <- token_lists[keep_rows]
+    source_row_idx <- source_row_idx[keep_rows]
+  }
+
+  filtered_out_rows <- input_rows - length(token_lists)
   original_cols <- vapply(token_lists, length, integer(1))
+
+  if (length(token_lists) == 0) {
+    dt <- as.data.table(setNames(
+      replicate(length(acs_header), character(), simplify = FALSE),
+      acs_header
+    ))
+    delete_logs <- data.table(
+      file = character(),
+      row = integer(),
+      header = character(),
+      expected_value = character(),
+      deleted_count = integer(),
+      deleted_content = character()
+    )
+    generalized_misalignment_log <- build_generalized_misalignment_report(
+      dt = dt,
+      file_name = basename(raw_file),
+      headers = acs_header,
+      checkpoints = checkpoint_map
+    )
+
+    output_dir <- dirname(output_file)
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)
+    }
+
+    fwrite(dt, output_file, quote = TRUE, na = "")
+
+    return(list(
+      summary = data.table(
+        file = basename(raw_file),
+        header_template = basename(header_file),
+        input_rows = input_rows,
+        filtered_out_rows = filtered_out_rows,
+        token_prefix = ifelse(is.null(token_prefix), NA_character_, token_prefix),
+        rows = nrow(dt),
+        original_cols_min = NA_integer_,
+        original_cols_max = NA_integer_,
+        output_cols = ncol(dt),
+        checkpoint_deletions = nrow(delete_logs),
+        generalized_rule_mismatches = nrow(generalized_misalignment_log),
+        exported_to = output_file
+      ),
+      data = dt,
+      delete_log = delete_logs,
+      generalized_misalignment_log = generalized_misalignment_log
+    ))
+  }
 
   aligned <- mapply(
     FUN = function(tok, row_idx) {
@@ -393,7 +459,7 @@ process_acs_file <- function(raw_file,
       )
     },
     tok = token_lists,
-    row_idx = seq_along(token_lists),
+    row_idx = source_row_idx,
     SIMPLIFY = FALSE
   )
 
@@ -421,6 +487,9 @@ process_acs_file <- function(raw_file,
     summary = data.table(
       file = basename(raw_file),
       header_template = basename(header_file),
+      input_rows = input_rows,
+      filtered_out_rows = filtered_out_rows,
+      token_prefix = ifelse(is.null(token_prefix), NA_character_, token_prefix),
       rows = nrow(dt),
       original_cols_min = min(original_cols),
       original_cols_max = max(original_cols),
@@ -438,21 +507,38 @@ process_acs_file <- function(raw_file,
 process_acs_batch <- function(raw_dir = "raw",
                               header_dir = "header",
                               export_dir = "export",
+                              date_subfolder = format(Sys.Date(), "%Y%m%d"),
                               raw_pattern = "^acs-nmcb-[0-9]+\\.csv$",
+                              token_prefix = NULL,
                               checkpoint_map = default_checkpoint_map()) {
-  if (!dir.exists(export_dir)) {
-    dir.create(export_dir, recursive = TRUE)
-  }
-
   raw_files <- list.files(raw_dir, pattern = raw_pattern, full.names = TRUE)
 
   if (length(raw_files) == 0) {
     stop("No matching CSV files found in raw directory: ", raw_dir)
   }
 
-  results <- lapply(raw_files, function(raw_file) {
-    header_file <- infer_numbered_header_path(raw_file, header_dir)
-    output_file <- file.path(export_dir, basename(raw_file))
+  header_files <- vapply(raw_files, infer_numbered_header_path, character(1), header_dir = header_dir)
+  missing_raw_files <- raw_files[!file.exists(raw_files)]
+  missing_header_files <- header_files[!file.exists(header_files)]
+
+  if (length(missing_raw_files) > 0 || length(missing_header_files) > 0) {
+    stop(
+      "Cannot start export because required input files are missing.\n",
+      "Missing raw files: ", paste(missing_raw_files, collapse = ", "), "\n",
+      "Missing header files: ", paste(missing_header_files, collapse = ", ")
+    )
+  }
+
+  run_export_dir <- file.path(export_dir, date_subfolder)
+
+  if (!dir.exists(run_export_dir)) {
+    dir.create(run_export_dir, recursive = TRUE)
+  }
+
+  results <- lapply(seq_along(raw_files), function(idx) {
+    raw_file <- raw_files[[idx]]
+    header_file <- header_files[[idx]]
+    output_file <- file.path(run_export_dir, basename(raw_file))
 
     cat(
       "Processing", basename(raw_file),
@@ -463,6 +549,7 @@ process_acs_batch <- function(raw_dir = "raw",
       raw_file = raw_file,
       header_file = header_file,
       output_file = output_file,
+      token_prefix = token_prefix,
       checkpoint_map = checkpoint_map
     )
   })
@@ -474,8 +561,8 @@ process_acs_batch <- function(raw_dir = "raw",
     fill = TRUE
   )
 
-  deleted_log_path <- file.path(export_dir, "deleted_cells_log.csv")
-  generalized_misalignment_log_path <- file.path(export_dir, "generalized_rule_misalignment_log.csv")
+  deleted_log_path <- file.path(run_export_dir, "deleted_cells_log.csv")
+  generalized_misalignment_log_path <- file.path(run_export_dir, "generalized_rule_misalignment_log.csv")
 
   fwrite(deleted_cells_log, deleted_log_path, quote = TRUE, na = "")
   fwrite(generalized_misalignment_log, generalized_misalignment_log_path, quote = TRUE, na = "")
@@ -484,6 +571,7 @@ process_acs_batch <- function(raw_dir = "raw",
     summary = processing_summary,
     delete_log = deleted_cells_log,
     generalized_misalignment_log = generalized_misalignment_log,
+    export_dir = run_export_dir,
     deleted_log_path = deleted_log_path,
     generalized_misalignment_log_path = generalized_misalignment_log_path
   )

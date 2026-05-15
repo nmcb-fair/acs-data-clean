@@ -10,7 +10,7 @@ usage <- function() {
     "  Rscript process_acs.R\n",
     "\n",
     "Run one raw file with one header template:\n",
-    "  Rscript process_acs.R --raw raw/acs-nmcb-2.csv --header header/nmcb-acs-header-2.csv --out export/acs-nmcb-2.csv\n",
+    "  Rscript process_acs.R --raw raw/acs-nmcb-2.csv --header header/nmcb-acs-header-2.csv\n",
     "\n",
     "Optional folder settings for the standard workflow:\n",
     "  Rscript process_acs.R --raw-dir raw --header-dir header --export-dir export\n",
@@ -18,10 +18,11 @@ usage <- function() {
     "Options:\n",
     "  --raw          Raw ACS CSV file without headers\n",
     "  --header       Header/template CSV file with one header row\n",
-    "  --out          Cleaned output CSV file\n",
+    "  --out          Cleaned output CSV file or output folder; default: export/YYYYMMDD/\n",
     "  --raw-dir      Folder containing raw files; default: raw\n",
     "  --header-dir   Folder containing header templates; default: header\n",
     "  --export-dir   Folder for cleaned outputs; default: export\n",
+    "  --token-prefix Only keep rows where O_token starts with this value; default: nmcb; use all to keep every row\n",
     "  --help         Show this help message\n",
     sep = ""
   )
@@ -63,28 +64,46 @@ if (isTRUE(opts$help)) {
   quit(status = 0)
 }
 
-has_single_file_args <- all(c("raw", "header", "out") %in% names(opts))
+has_single_file_args <- all(c("raw", "header") %in% names(opts))
 has_some_single_file_args <- any(c("raw", "header", "out") %in% names(opts))
 
 if (has_some_single_file_args && !has_single_file_args) {
-  stop("For one-file processing, please provide all three options: --raw, --header, and --out")
+  stop("For one-file processing, please provide both --raw and --header")
+}
+
+token_prefix <- if (!is.null(opts[["token-prefix"]])) opts[["token-prefix"]] else "nmcb"
+if (tolower(token_prefix) %in% c("all", "none", "")) {
+  token_prefix <- NULL
 }
 
 if (has_single_file_args) {
+  export_dir <- if (!is.null(opts[["export-dir"]])) opts[["export-dir"]] else "export"
+  dated_export_dir <- file.path(export_dir, format(Sys.Date(), "%Y%m%d"))
+
+  if (is.null(opts$out)) {
+    output_file <- file.path(dated_export_dir, basename(opts$raw))
+  } else if (grepl("\\.csv$", opts$out, ignore.case = TRUE)) {
+    output_file <- opts$out
+  } else {
+    output_file <- file.path(opts$out, format(Sys.Date(), "%Y%m%d"), basename(opts$raw))
+  }
+
   result <- process_acs_file(
     raw_file = opts$raw,
     header_file = opts$header,
-    output_file = opts$out
+    output_file = output_file,
+    token_prefix = token_prefix
   )
 
-  output_dir <- dirname(opts$out)
-  deleted_log_path <- file.path(output_dir, paste0(tools::file_path_sans_ext(basename(opts$out)), "_deleted_cells_log.csv"))
-  misalignment_log_path <- file.path(output_dir, paste0(tools::file_path_sans_ext(basename(opts$out)), "_generalized_rule_misalignment_log.csv"))
+  output_dir <- dirname(output_file)
+  output_stem <- tools::file_path_sans_ext(basename(output_file))
+  deleted_log_path <- file.path(output_dir, paste0(output_stem, "_deleted_cells_log.csv"))
+  misalignment_log_path <- file.path(output_dir, paste0(output_stem, "_generalized_rule_misalignment_log.csv"))
 
   fwrite(result$delete_log, deleted_log_path, quote = TRUE, na = "")
   fwrite(result$generalized_misalignment_log, misalignment_log_path, quote = TRUE, na = "")
 
-  cat("Cleaned file written to:", opts$out, "\n")
+  cat("Cleaned file written to:", output_file, "\n")
   cat("Deleted-cell log written to:", deleted_log_path, "\n")
   cat("Misalignment log written to:", misalignment_log_path, "\n")
   print(result$summary)
@@ -96,10 +115,11 @@ if (has_single_file_args) {
   result <- process_acs_batch(
     raw_dir = raw_dir,
     header_dir = header_dir,
-    export_dir = export_dir
+    export_dir = export_dir,
+    token_prefix = token_prefix
   )
 
-  cat("Cleaned files written to:", export_dir, "\n")
+  cat("Cleaned files written to:", result$export_dir, "\n")
   cat("Deleted-cell log written to:", result$deleted_log_path, "\n")
   cat("Misalignment log written to:", result$generalized_misalignment_log_path, "\n")
   print(result$summary)
