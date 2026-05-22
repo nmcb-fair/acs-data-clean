@@ -132,6 +132,18 @@ expected_from_general_rules <- function(header_name) {
     return("reverse")
   }
 
+  if (grepl("corsi_element", header_name, ignore.case = TRUE)) {
+    return("corsi")
+  }
+
+  if (grepl("_CORSI_FW_DEMO$", header_name, ignore.case = TRUE)) {
+    return("corsiblocktapping-forward-demo")
+  }
+
+  if (grepl("_CORSI_FW$", header_name, ignore.case = TRUE)) {
+    return("corsiblocktapping-forward")
+  }
+
   if (grepl("_questionnaire[0-9]+$", header_name, ignore.case = TRUE)) {
     return("questionnaire")
   }

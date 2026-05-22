@@ -2,7 +2,7 @@
 
 This project turns raw ACS CSV files into cleaned CSV files with the correct header/template. It also fixes common row shifts and writes log files so you can see what was changed.
 
-This tool was originally developed by Shuxin Zhang for the NMCB-FAIR project. The canonical maintained repository is hosted at <https://github.com/nmcb-fair/acs-data-clean>.
+This tool was originally developed by Shuxin Zhang for the NMCB-FAIR project. The canonical maintained repository is hosted at [https://github.com/nmcb-fair/acs-data-clean](https://github.com/nmcb-fair/acs-data-clean).
 
 The raw ACS files do not have headers. You provide:
 
@@ -131,7 +131,7 @@ install.packages("data.table")
 
 For stable reuse, use a GitHub release rather than an arbitrary branch snapshot:
 
-<https://github.com/nmcb-fair/acs-data-clean/releases>
+[https://github.com/nmcb-fair/acs-data-clean/releases](https://github.com/nmcb-fair/acs-data-clean/releases)
 
 Recommended version pattern:
 
@@ -150,7 +150,7 @@ For academic reuse, the project can also be archived with Zenodo to create a DOI
 
 Use GitHub Issues for bugs, questions, and feature requests:
 
-<https://github.com/nmcb-fair/acs-data-clean/issues>
+[https://github.com/nmcb-fair/acs-data-clean/issues](https://github.com/nmcb-fair/acs-data-clean/issues)
 
 When opening an issue, include:
 
@@ -204,3 +204,4 @@ Or process the standard folders:
 source("R/acs_cleaning.R")
 process_acs_batch(raw_dir = "raw", header_dir = "header", export_dir = "export", token_prefix = "nmcb")
 ```
+
