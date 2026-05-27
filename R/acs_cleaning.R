@@ -144,6 +144,50 @@ expected_from_general_rules <- function(header_name) {
     return("corsiblocktapping-forward")
   }
 
+  if (grepl("TMTAdemo$|TMTBdemo$", header_name, ignore.case = TRUE)) {
+    return("trailmaking")
+  }
+
+  if (grepl("_TMTA$", header_name, ignore.case = TRUE)) {
+    return("trailmaking")
+  }
+
+  if (grepl("_TMTB$", header_name, ignore.case = TRUE)) {
+    return("trailmaking")
+  }
+
+  if (grepl("_TMTA_DEMO$", header_name, ignore.case = TRUE)) {
+    return("demo-numbers")
+  }
+
+  if (grepl("_TMTA_nrs$", header_name, ignore.case = TRUE)) {
+    return("numbers")
+  }
+
+  if (grepl("_TMTB_DEMO$", header_name, ignore.case = TRUE)) {
+    return("demo-numbers-letters")
+  }
+
+  if (grepl("_TMTB_nrs_letters$", header_name, ignore.case = TRUE)) {
+    return("numbers-letters")
+  }
+
+  if (grepl("O_10_set_name$", header_name, ignore.case = TRUE)) {
+    return("demo-numbers")
+  }
+
+  if (grepl("O_11_set_name$", header_name, ignore.case = TRUE)) {
+    return("numbers")
+  }
+
+  if (grepl("O_12_set_name$", header_name, ignore.case = TRUE)) {
+    return("demo-numbers-letters")
+  }
+
+  if (grepl("O_13_set_name$", header_name, ignore.case = TRUE)) {
+    return("numbers-letters")
+  }
+
   if (grepl("_questionnaire[0-9]+$", header_name, ignore.case = TRUE)) {
     return("questionnaire")
   }
@@ -516,6 +560,158 @@ process_acs_file <- function(raw_file,
   )
 }
 
+is_nmcb_complete <- function(dt) {
+  required_cols <- c("O_34_time_t", "O_34_type")
+  missing_cols <- setdiff(required_cols, names(dt))
+
+  if (length(missing_cols) > 0) {
+    stop("Missing completion columns: ", paste(missing_cols, collapse = ", "))
+  }
+
+  time_t <- trimws(as.character(dt$O_34_time_t))
+  type <- trimws(as.character(dt$O_34_type))
+  !is.na(time_t) & nzchar(time_t) & !is.na(type) & nzchar(type)
+}
+
+write_export_readme <- function(export_dir,
+                                processing_summary,
+                                token_prefix = "nmcb") {
+  export_files <- sort(list.files(
+    export_dir,
+    pattern = "^acs-nmcb-[0-9]+\\.csv$",
+    full.names = TRUE
+  ))
+
+  if (length(export_files) == 0) {
+    stop("No cleaned export files found in: ", export_dir)
+  }
+
+  stats_rows <- lapply(export_files, function(export_file) {
+    dt <- fread(export_file, encoding = "UTF-8")
+    complete <- is_nmcb_complete(dt)
+    incomplete_tokens <- character(0)
+
+    if ("O_token" %in% names(dt)) {
+      incomplete_tokens <- as.character(dt$O_token[!complete])
+      incomplete_tokens <- incomplete_tokens[!is.na(incomplete_tokens) & nzchar(incomplete_tokens)]
+    }
+
+    data.table(
+      file = basename(export_file),
+      exported_rows = nrow(dt),
+      complete_rows = sum(complete),
+      incomplete_rows = sum(!complete),
+      incomplete_tokens = if (length(incomplete_tokens) == 0) {
+        NA_character_
+      } else {
+        paste(incomplete_tokens, collapse = ", ")
+      }
+    )
+  })
+
+  stats <- rbindlist(stats_rows)
+  total_exported <- sum(stats$exported_rows)
+  total_complete <- sum(stats$complete_rows)
+  total_incomplete <- sum(stats$incomplete_rows)
+  total_filtered <- sum(processing_summary$filtered_out_rows, na.rm = TRUE)
+  total_checkpoint_deletions <- sum(processing_summary$checkpoint_deletions, na.rm = TRUE)
+  total_misalignments <- sum(processing_summary$generalized_rule_mismatches, na.rm = TRUE)
+  export_date <- basename(export_dir)
+  generated_at <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  token_prefix_label <- if (is.null(token_prefix) || !nzchar(token_prefix)) "all rows kept" else token_prefix
+
+  stats_table <- paste(
+    apply(stats, 1, function(row) {
+      paste0(
+        "| ", row[["file"]],
+        " | ", row[["exported_rows"]],
+        " | ", row[["complete_rows"]],
+        " | ", row[["incomplete_rows"]], " |"
+      )
+    }),
+    collapse = "\n"
+  )
+
+  incomplete_lines <- stats[incomplete_rows > 0, .(file, incomplete_tokens)]
+  incomplete_section <- if (nrow(incomplete_lines) == 0) {
+    "All exported rows meet the completion rule."
+  } else {
+    paste(
+      apply(incomplete_lines, 1, function(row) {
+        paste0("- **", row[["file"]], "**: ", row[["incomplete_tokens"]])
+      }),
+      collapse = "\n"
+    )
+  }
+
+  readme_lines <- c(
+    paste0("# ACS Export ", export_date),
+    "",
+    paste0("Generated on ", generated_at, " by `process_acs.R`."),
+    "",
+    "This folder contains cleaned NMCB ACS data for one export run. Each cleaned file is paired with the matching header template from `header/`.",
+    "",
+    "## Completion Rule",
+    "",
+    "For NMCB, a participant row is treated as **complete** when both of these columns are non-empty:",
+    "",
+    "- `O_34_time_t`",
+    "- `O_34_type`",
+    "",
+    "These columns belong to the mouse-type task near the end of the battery. If either value is missing, the row is counted as incomplete even though earlier tasks may contain data.",
+    "",
+    "## Summary",
+    "",
+    paste0("- Exported participant rows: **", total_exported, "**"),
+    paste0("- Complete rows: **", total_complete, "**"),
+    paste0("- Incomplete rows: **", total_incomplete, "**"),
+    paste0("- Raw rows filtered out before export: **", total_filtered, "**"),
+    paste0("- Token filter: **`", token_prefix_label, "`**"),
+    paste0("- Checkpoint deletions logged: **", total_checkpoint_deletions, "**"),
+    paste0("- Generalized-rule mismatches logged: **", total_misalignments, "**"),
+    "",
+    "## Rows By Battery File",
+    "",
+    "| File | Exported rows | Complete | Incomplete |",
+    "| --- | ---: | ---: | ---: |",
+    stats_table,
+    paste0("| **Total** | **", total_exported, "** | **", total_complete, "** | **", total_incomplete, "** |"),
+    "",
+    "## Incomplete Tokens",
+    "",
+    incomplete_section,
+    "",
+    "## How The Raw Data Was Cleaned",
+    "",
+    "1. Raw ACS CSV files from `raw/` were read without headers.",
+    "2. Only rows whose token starts with the configured prefix were kept. For NMCB, test rows such as `marysetest` are excluded by default.",
+    "3. Each raw file was matched to its numbered header template, for example `raw/acs-nmcb-2.csv` with `header/nmcb-acs-header-2.csv`.",
+    "4. Packed questionnaire values such as `1|Question text|0` were split into separate columns.",
+    "5. Values were aligned to the template using checkpoint markers such as `message`, `video`, `digitspan`, `corsi`, and `mousetype`.",
+    "6. When extra or shifted tokens were found, the script searched ahead for the expected checkpoint and logged deleted tokens.",
+    "7. Cleaned CSV files and log files were written to this dated export folder.",
+    "",
+    "For full project documentation, see the repository README at the project root.",
+    "",
+    "## Files In This Folder",
+    "",
+    "- `acs-nmcb-1.csv` through `acs-nmcb-6.csv`: cleaned data with headers.",
+    "- `deleted_cells_log.csv`: tokens removed during checkpoint correction.",
+    "- `generalized_rule_misalignment_log.csv`: remaining value mismatches against generalized checkpoint rules. Missing later tasks are usually not listed because they often mean the participant stopped early.",
+    "",
+    "## Notes",
+    "",
+    "- Each battery file is exported separately. A participant appears in only one of the six files.",
+    "- Do not treat incomplete rows as finished sessions.",
+    "- Do not share raw tokens or participant answers outside approved secure workflows.",
+    ""
+  )
+
+  readme_path <- file.path(export_dir, "README.md")
+  writeLines(readme_lines, readme_path, useBytes = TRUE)
+  readme_path
+}
+
 process_acs_batch <- function(raw_dir = "raw",
                               header_dir = "header",
                               export_dir = "export",
@@ -579,12 +775,19 @@ process_acs_batch <- function(raw_dir = "raw",
   fwrite(deleted_cells_log, deleted_log_path, quote = TRUE, na = "")
   fwrite(generalized_misalignment_log, generalized_misalignment_log_path, quote = TRUE, na = "")
 
+  readme_path <- write_export_readme(
+    export_dir = run_export_dir,
+    processing_summary = processing_summary,
+    token_prefix = token_prefix
+  )
+
   list(
     summary = processing_summary,
     delete_log = deleted_cells_log,
     generalized_misalignment_log = generalized_misalignment_log,
     export_dir = run_export_dir,
     deleted_log_path = deleted_log_path,
-    generalized_misalignment_log_path = generalized_misalignment_log_path
+    generalized_misalignment_log_path = generalized_misalignment_log_path,
+    readme_path = readme_path
   )
 }

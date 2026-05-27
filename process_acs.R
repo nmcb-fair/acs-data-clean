@@ -120,6 +120,7 @@ if (has_single_file_args) {
   )
 
   cat("Cleaned files written to:", result$export_dir, "\n")
+  cat("Export README written to:", result$readme_path, "\n")
   cat("Deleted-cell log written to:", result$deleted_log_path, "\n")
   cat("Misalignment log written to:", result$generalized_misalignment_log_path, "\n")
   print(result$summary)
